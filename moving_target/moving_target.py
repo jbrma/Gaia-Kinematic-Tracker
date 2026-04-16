@@ -5,6 +5,15 @@ from pygaia.astrometry.coordinates import EpochPropagation
 import extinction 
 from PIL import Image
 from matplotlib.patches import Ellipse
+import astropy.io.fits as fits
+from astropy.wcs import WCS
+from astropy.coordinates import SkyCoord
+from astropy.wcs.utils import proj_plane_pixel_scales
+import astropy.units as u
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+import matplotlib.patches as patches
+
 
 
 np.random.seed(42)
@@ -17,7 +26,9 @@ target_id = '1858717401682424064'
 
 # TIME & SIMULATION PARAMETERS
 tau_mean = 100280      
-tau_error = 30020      
+tau_error = 30020
+tau_min = 70000
+tau_max = 135000      
 N = 1000               
 deg_from_center = 0.02  
 
@@ -96,6 +107,8 @@ ns_parallax = target_star['parallax']
 ns_pmra = target_star['pmra']
 ns_pmdec = target_star['pmdec']
 ns_rv = target_star['radial_velocity']
+ns_pmra_err = target_star['pmra_error']
+ns_pmdec_err = target_star['pmdec_error']
 
 print(f"Target parameters: PMRA={ns_pmra:.2f}, PMDEC={ns_pmdec:.2f}, RV={ns_rv:.2f}")
 
@@ -105,6 +118,7 @@ print(f"\nStarting Monte Carlo simulation (N={N}) for {len(df)} stars...")
 
 probabilities = []
 min_distances = []
+
 ep = EpochPropagation()
 
 for i, row in df.iterrows():
@@ -132,13 +146,14 @@ for i, row in df.iterrows():
     ns_ra_arr = np.full(N, np.radians(ns_ra))
     ns_dec_arr = np.full(N, np.radians(ns_dec))
     ns_px_arr = np.full(N, ns_parallax)
-    ns_pmra_arr = np.full(N, ns_pmra)
-    ns_pmdec_arr = np.full(N, ns_pmdec)
     ns_rv_arr = np.full(N, ns_rv)
+
+    ns_pmra_samples = np.random.normal(loc=ns_pmra, scale=ns_pmra_err, size=N)
+    ns_pmdec_samples = np.random.normal(loc=ns_pmdec, scale=ns_pmdec_err, size=N)
 
     ns_ra_past_rad, ns_dec_past_rad = ep.propagate_pos(
         ns_ra_arr, ns_dec_arr, ns_px_arr, 
-        ns_pmra_arr, ns_pmdec_arr, ns_rv_arr, 2016.0, 2016.0 - tau_samples
+        ns_pmra_samples, ns_pmdec_samples, ns_rv_arr, 2016.0, 2016.0 - tau_samples
     )
     ns_ra_past = np.degrees(ns_ra_past_rad)
     ns_dec_past = np.degrees(ns_dec_past_rad)
@@ -169,17 +184,126 @@ columns_to_print = ['source_id', 'crossing_probability', 'min_distance_deg', 'pm
 print(candidates[columns_to_print].head(10))
 
 
+# PROBABILITY
+
+top_candidates = candidates.head(10)
+colors = cm.rainbow(np.linspace(0, 1, len(top_candidates)))
+np.random.seed(99) 
+np.random.shuffle(colors)
+
+print("\nCalculating overlap probability at each time step for top candidates...")
+
+eval_times = np.arange(tau_min, tau_max, 1000)
+prob_over_time = {}
+
+for idx, (index, row) in enumerate(top_candidates.iterrows()):
+    np.random.seed(index)
+    
+    # Nube Monte Carlo de la candidata
+    pmra_samples = np.random.normal(loc=row['pmra'], scale=row['pmra_error'], size=N)
+    pmdec_samples = np.random.normal(loc=row['pmdec'], scale=row['pmdec_error'], size=N)
+    
+    ra_rad_arr = np.full(N, np.radians(row['ra']))
+    dec_rad_arr = np.full(N, np.radians(row['dec']))
+    px_arr = np.full(N, row['parallax'])
+    rv_arr = np.full(N, row['radial_velocity'])
+    
+    time_probs = []
+    
+    # vamos a cada step de tiempo específico (t)
+    for t in eval_times:
+        # Propagar Candidata
+        ra_past_rad, dec_past_rad = ep.propagate_pos(
+            ra_rad_arr, dec_rad_arr, px_arr, 
+            pmra_samples, pmdec_samples, rv_arr, 2016.0, 2016.0 - t
+        )
+        ra_past = np.degrees(ra_past_rad)
+        dec_past = np.degrees(dec_past_rad)
+        
+        # Propagar Target (usando las muestras ns_pmra_samples y ns_pmdec_samples)
+        ns_ra_past_rad, ns_dec_past_rad = ep.propagate_pos(
+            ns_ra_arr, ns_dec_arr, ns_px_arr, 
+            ns_pmra_samples, ns_pmdec_samples, ns_rv_arr, 2016.0, 2016.0 - t
+        )
+        ns_ra_past = np.degrees(ns_ra_past_rad)
+        ns_dec_past = np.degrees(ns_dec_past_rad)
+        
+        # distancia en ese instante exacto
+        d_ra = (ra_past - ns_ra_past) * np.cos(np.radians(ns_dec_past))
+        d_dec = (dec_past - ns_dec_past)
+        distances = np.sqrt(d_ra**2 + d_dec**2)
+        
+        # cuántos de los 1000 universos chocan en este año concreto
+        hits = np.sum(distances < deg_from_center)
+        time_probs.append(hits / N)
+        
+    prob_over_time[row['source_id']] = time_probs
+
+plt.figure(figsize=(10, 6))
+
+for idx, (index, row) in enumerate(top_candidates.iterrows()):
+    source = row['source_id']
+    probs = prob_over_time[source]
+    color = colors[idx] 
+    
+    if max(probs) > 0:
+        plt.plot(eval_times / 1000.0, probs, linewidth=2, marker='.', color=color, label=f"{idx + 1}: {source}")
+
+plt.axvline(x=tau_mean/1000.0, color='black', linestyle='--', linewidth=2, label='Supernova Est. Age (100 kyr)')
+
+plt.title('Kinematic Intersection Probability over Time', fontsize=14, fontweight='bold')
+plt.xlabel('Time into the past (kilo-years)', fontsize=12)
+plt.ylabel('Overlap Probability (Hits / N)', fontsize=12)
+plt.xlim(70, 135)
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.legend(loc='upper right', fontsize=9)
+plt.tight_layout()
+plt.show(block=False)
+
+
+# EXPORT DETAILED CANDIDATES TABLE 
+
+print("\nGenerating professional Excel report with two sheets...")
+
+time_columns = [f"{int(t/1000)} kyr" for t in eval_times]
+
+cols_info = [
+    'source_id', 'crossing_probability', 'min_distance_deg',
+    'ra', 'dec', 'distance_pc', 'v_transverse', 'radial_velocity',
+    'abs_mag_g', 'bp_rp_color', 'A_V'
+]
+df_info = top_candidates[cols_info].copy()
+
+df_info.rename(columns={
+    'source_id': 'Gaia DR3 Source ID',
+    'crossing_probability': 'Global Hit Prob.',
+    'min_distance_deg': 'Min Dist (°)',
+    'ra': 'RA (deg)',
+    'dec': 'DEC (deg)',
+    'distance_pc': 'Dist (pc)',
+    'v_transverse': 'V_T (km/s)',
+    'radial_velocity': 'RV (km/s)',
+    'abs_mag_g': 'Abs Mag (Mg)',
+    'bp_rp_color': 'Color (BP-RP)0',
+    'A_V': 'Extinction (Av)'
+}, inplace=True)
+
+prob_data = {'Gaia DR3 Source ID': top_candidates['source_id'].values}
+
+for t_idx, t_val in enumerate(eval_times):
+    col_name = f"{int(t_val/1000)} kyr"
+    prob_data[col_name] = [prob_over_time[sid][t_idx] for sid in top_candidates['source_id']]
+
+df_probs = pd.DataFrame(prob_data)
+
+excel_filename = 'Top_Candidates_Analysis.xlsx'
+with pd.ExcelWriter(excel_filename, engine='openpyxl') as writer:
+    df_info.to_excel(writer, sheet_name='Astrophysical_Details', index=False)
+    df_probs.to_excel(writer, sheet_name='Time_Series_Probs', index=False)
+
+print(f"Excel file created: {excel_filename}")
+
 # DRAW 
-
-import astropy.io.fits as fits
-from astropy.wcs import WCS
-from astropy.coordinates import SkyCoord
-from astropy.wcs.utils import proj_plane_pixel_scales
-import astropy.units as u
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
-import matplotlib.patches as patches
-
 
 image = fits.open(fits_file)
 data = image[0].data 
@@ -218,10 +342,7 @@ target_circle = patches.Circle((target_past_x, target_past_y), radius=radius_pix
                                linewidth=2, alpha=0.8, zorder=4)
 ax1.add_patch(target_circle)
 
-top_candidates = candidates.head(10)
-colors = cm.rainbow(np.linspace(0, 1, len(top_candidates)))
-np.random.seed(99) 
-np.random.shuffle(colors)
+
 
 for idx, (index, row) in enumerate(top_candidates.iterrows()):
     color = colors[idx]
@@ -307,6 +428,9 @@ scat = plt.scatter(
     vmin=-0.5, vmax=3.5   
 )
 
+plt.vlines(x=1.0, ymin=-5, ymax=5.0, color='red', linestyle='--', linewidth=1.5, label='Color cut (BP-RP < 1)')
+plt.hlines(y=5.0, xmin=-1, xmax=1.0, color='green', linestyle='--', linewidth=1.5, label='Mag cut (M_G < 5)')
+
 cb = plt.colorbar(scat)
 cb.set_label('Temperature (Color BP-RP)')
 
@@ -354,7 +478,7 @@ if os.path.exists(output_folder):
     shutil.rmtree(output_folder)
 os.makedirs(output_folder)
 
-time_centers = np.arange(70000, 135000, 5000)
+time_centers = np.arange(tau_min, tau_max, 5000)
 time_window = 10000
 
 print("\nCreating the GIF...")
