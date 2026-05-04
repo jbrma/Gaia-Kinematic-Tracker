@@ -21,8 +21,9 @@ np.random.seed(42)
 csv_file = 'stars.csv'
 fits_file = 'cygnus.fits'
 
-#target_id = '1859461255653506176'
-target_id = '1858717401682424064'
+target_id = '1859461255653506176'
+#target_id = '1858717401682424064'
+#target_id = '1858675134890513152'
 
 # TIME & SIMULATION PARAMETERS
 tau_mean = 100280      
@@ -30,7 +31,49 @@ tau_error = 30020
 tau_min = 70000
 tau_max = 135000      
 N = 1000               
-deg_from_center = 0.02  
+#deg_from_center = 0.02  
+number_sigma = 3
+
+
+def calculate_overlap_2d(ra_cand, dec_cand, ra_target, dec_target, n_sigma, num_particles):
+    """
+    Calcula la probabilidad de intersección mutua entre dos nubes de puntos 2D 
+    (Estrella y Púlsar) usando radios circulares, y devuelve la distancia entre sus centros.
+    """
+    # centros
+    cand_ra_mean = np.mean(ra_cand)
+    cand_dec_mean = np.mean(dec_cand)
+    ns_ra_mean = np.mean(ra_target)
+    ns_dec_mean = np.mean(dec_target)
+    
+    # desviaciones estándar y radios
+    cand_ra_std = np.std(ra_cand) * np.cos(np.radians(cand_dec_mean))
+    cand_dec_std = np.std(dec_cand)
+    ns_ra_std = np.std(ra_target) * np.cos(np.radians(ns_dec_mean))
+    ns_dec_std = np.std(dec_target)
+
+    cand_radius = np.sqrt(cand_ra_std**2 + cand_dec_std**2) * n_sigma
+    ns_radius = np.sqrt(ns_ra_std**2 + ns_dec_std**2) * n_sigma
+    
+    # fracción Púlsar
+    dx_pulsar = (ra_target - cand_ra_mean) * np.cos(np.radians(cand_dec_mean))
+    dy_pulsar = dec_target - cand_dec_mean
+    frac_pulsar = np.sum(np.sqrt(dx_pulsar**2 + dy_pulsar**2) < cand_radius) / num_particles
+
+    # fracción Estrella
+    dx_cand = (ra_cand - ns_ra_mean) * np.cos(np.radians(ns_dec_mean))
+    dy_cand = dec_cand - ns_dec_mean
+    frac_star = np.sum(np.sqrt(dx_cand**2 + dy_cand**2) < ns_radius) / num_particles
+
+    # probabilidad cruzada y distancia mínima
+    prob = frac_pulsar * frac_star
+    
+    d_ra_center = (cand_ra_mean - ns_ra_mean) * np.cos(np.radians(ns_dec_mean))
+    d_dec_center = (cand_dec_mean - ns_dec_mean)
+    min_dist = np.sqrt(d_ra_center**2 + d_dec_center**2)
+
+    return prob, min_dist, ns_radius
+
 
 df = pd.read_csv(csv_file, dtype={'source_id': str})
 
@@ -118,8 +161,16 @@ print(f"\nStarting Monte Carlo simulation (N={N}) for {len(df)} stars...")
 
 probabilities = []
 min_distances = []
-
 ep = EpochPropagation()
+
+# neutron star data
+np.random.seed(888)
+ns_ra_arr = np.full(N, np.radians(ns_ra))
+ns_dec_arr = np.full(N, np.radians(ns_dec))
+ns_px_arr = np.full(N, ns_parallax)
+ns_rv_arr = np.full(N, ns_rv)
+ns_pmra_samples = np.random.normal(loc=ns_pmra, scale=ns_pmra_err, size=N)
+ns_pmdec_samples = np.random.normal(loc=ns_pmdec, scale=ns_pmdec_err, size=N)
 
 for i, row in df.iterrows():
     np.random.seed(i)
@@ -142,15 +193,6 @@ for i, row in df.iterrows():
     ra_past = np.degrees(ra_past_rad)
     dec_past = np.degrees(dec_past_rad)
     
-    # Propagate the target star to the exact same past epochs
-    ns_ra_arr = np.full(N, np.radians(ns_ra))
-    ns_dec_arr = np.full(N, np.radians(ns_dec))
-    ns_px_arr = np.full(N, ns_parallax)
-    ns_rv_arr = np.full(N, ns_rv)
-
-    ns_pmra_samples = np.random.normal(loc=ns_pmra, scale=ns_pmra_err, size=N)
-    ns_pmdec_samples = np.random.normal(loc=ns_pmdec, scale=ns_pmdec_err, size=N)
-
     ns_ra_past_rad, ns_dec_past_rad = ep.propagate_pos(
         ns_ra_arr, ns_dec_arr, ns_px_arr, 
         ns_pmra_samples, ns_pmdec_samples, ns_rv_arr, 2016.0, 2016.0 - tau_samples
@@ -158,17 +200,10 @@ for i, row in df.iterrows():
     ns_ra_past = np.degrees(ns_ra_past_rad)
     ns_dec_past = np.degrees(ns_dec_past_rad)
 
-    # Calculate 3D spherical distance between Candidate and Target at each epoch
-    d_ra = (ra_past - ns_ra_past) * np.cos(np.radians(ns_dec_past))
-    d_dec = (dec_past - ns_dec_past)
-    distances = np.sqrt(d_ra**2 + d_dec**2)
-
-    # Check intersections within the target radius
-    hits = np.sum(distances < deg_from_center)
-    probability = hits / N  
+    prob, min_dist, _ = calculate_overlap_2d(ra_past, dec_past, ns_ra_past, ns_dec_past, number_sigma, N)
     
-    probabilities.append(probability)
-    min_distances.append(np.min(distances))
+    probabilities.append(prob)
+    min_distances.append(min_dist)
 
 df['crossing_probability'] = probabilities
 df['min_distance_deg'] = min_distances
@@ -177,26 +212,30 @@ df['min_distance_deg'] = min_distances
 # RESULTS
 
 candidates = df[df['crossing_probability'] > 0].copy()
-candidates = candidates.sort_values(by=['crossing_probability', 'min_distance_deg'], ascending=[False, True])
-
-print("\nTOP CANDIDATES")
-columns_to_print = ['source_id', 'crossing_probability', 'min_distance_deg', 'pm_total', 'v_transverse']
-print(candidates[columns_to_print].head(10))
-
 
 # PROBABILITY
-
-top_candidates = candidates.head(10)
-colors = cm.rainbow(np.linspace(0, 1, len(top_candidates)))
-np.random.seed(99) 
-np.random.shuffle(colors)
 
 print("\nCalculating overlap probability at each time step for top candidates...")
 
 eval_times = np.arange(tau_min, tau_max, 1000)
-prob_over_time = {}
 
-for idx, (index, row) in enumerate(top_candidates.iterrows()):
+# pre-calcular la historia temporal del Púlsar
+pulsar_history_ra = {}
+pulsar_history_dec = {}
+
+for t in eval_times:
+    ns_ra_past_rad, ns_dec_past_rad = ep.propagate_pos(
+        ns_ra_arr, ns_dec_arr, ns_px_arr, 
+        ns_pmra_samples, ns_pmdec_samples, ns_rv_arr, 2016.0, 2016.0 - t
+    )
+    pulsar_history_ra[t] = np.degrees(ns_ra_past_rad)
+    pulsar_history_dec[t] = np.degrees(ns_dec_past_rad)
+
+prob_over_time = {}
+peak_probabilities = []
+peak_ages = []
+
+for idx, (index, row) in enumerate(candidates.iterrows()):
     np.random.seed(index)
     
     # Nube Monte Carlo de la candidata
@@ -209,10 +248,12 @@ for idx, (index, row) in enumerate(top_candidates.iterrows()):
     rv_arr = np.full(N, row['radial_velocity'])
     
     time_probs = []
+    max_prob_for_star = 0.0
+    age_at_max = 0
     
     # vamos a cada step de tiempo específico (t)
     for t in eval_times:
-        # Propagar Candidata
+        # propagar Candidata
         ra_past_rad, dec_past_rad = ep.propagate_pos(
             ra_rad_arr, dec_rad_arr, px_arr, 
             pmra_samples, pmdec_samples, rv_arr, 2016.0, 2016.0 - t
@@ -220,24 +261,36 @@ for idx, (index, row) in enumerate(top_candidates.iterrows()):
         ra_past = np.degrees(ra_past_rad)
         dec_past = np.degrees(dec_past_rad)
         
-        # Propagar Target (usando las muestras ns_pmra_samples y ns_pmdec_samples)
-        ns_ra_past_rad, ns_dec_past_rad = ep.propagate_pos(
-            ns_ra_arr, ns_dec_arr, ns_px_arr, 
-            ns_pmra_samples, ns_pmdec_samples, ns_rv_arr, 2016.0, 2016.0 - t
-        )
-        ns_ra_past = np.degrees(ns_ra_past_rad)
-        ns_dec_past = np.degrees(ns_dec_past_rad)
+        ns_ra_past = pulsar_history_ra[t]
+        ns_dec_past = pulsar_history_dec[t]
+
+        prob, min_dist, ns_radius_3sigma = calculate_overlap_2d(ra_past, dec_past, ns_ra_past, ns_dec_past, number_sigma, N)
         
-        # distancia en ese instante exacto
-        d_ra = (ra_past - ns_ra_past) * np.cos(np.radians(ns_dec_past))
-        d_dec = (dec_past - ns_dec_past)
-        distances = np.sqrt(d_ra**2 + d_dec**2)
-        
-        # cuántos de los 1000 universos chocan en este año concreto
-        hits = np.sum(distances < deg_from_center)
-        time_probs.append(hits / N)
+        time_probs.append(prob)
+
+        if prob > max_prob_for_star:
+            max_prob_for_star = prob
+            age_at_max = t
         
     prob_over_time[row['source_id']] = time_probs
+    peak_probabilities.append(max_prob_for_star)
+    peak_ages.append(age_at_max)
+
+candidates['peak_probability'] = peak_probabilities
+candidates['kinematic_age'] = peak_ages
+
+candidates = candidates.sort_values(by=['peak_probability', 'min_distance_deg'], ascending=[False, True])
+top_candidates = candidates.head(10)
+
+print("\nTOP CANDIDATES")
+columns_to_print = ['source_id', 'peak_probability', 'kinematic_age', 'min_distance_deg', 'pm_total', 'v_transverse']
+print(candidates[columns_to_print].head(10))
+
+
+colors = cm.rainbow(np.linspace(0, 1, len(top_candidates)))
+np.random.seed(99) 
+np.random.shuffle(colors)
+
 
 plt.figure(figsize=(10, 6))
 
@@ -268,7 +321,7 @@ print("\nGenerating professional Excel report with two sheets...")
 time_columns = [f"{int(t/1000)} kyr" for t in eval_times]
 
 cols_info = [
-    'source_id', 'crossing_probability', 'min_distance_deg',
+    'source_id', 'peak_probability', 'kinematic_age', 'crossing_probability', 'min_distance_deg',
     'ra', 'dec', 'distance_pc', 'v_transverse', 'radial_velocity',
     'abs_mag_g', 'bp_rp_color', 'A_V'
 ]
@@ -276,6 +329,8 @@ df_info = top_candidates[cols_info].copy()
 
 df_info.rename(columns={
     'source_id': 'Gaia DR3 Source ID',
+    'peak_probability': 'Peak Prob.',
+    'kinematic_age': 'Kinematic age',
     'crossing_probability': 'Global Hit Prob.',
     'min_distance_deg': 'Min Dist (°)',
     'ra': 'RA (deg)',
@@ -334,9 +389,29 @@ target_past_x, target_past_y = float(target_past_x), float(target_past_y)
 # Yellow dot for the target's past position
 ax1.plot(target_past_x, target_past_y, '.', color='yellow', markersize=15, markeredgecolor='black', zorder=10)
 
+np.random.seed(888)
+draw_pmra_samples = np.random.normal(loc=ns_pmra, scale=ns_pmra_err, size=N)
+draw_pmdec_samples = np.random.normal(loc=ns_pmdec, scale=ns_pmdec_err, size=N)
+
+ns_ra_rad_arr = np.full(N, np.radians(ns_ra))
+ns_dec_rad_arr = np.full(N, np.radians(ns_dec))
+ns_px_arr = np.full(N, ns_parallax)
+ns_rv_arr = np.full(N, ns_rv)
+
+draw_ra_past_rad, draw_dec_past_rad = ep.propagate_pos(
+    ns_ra_rad_arr, ns_dec_rad_arr, ns_px_arr, 
+    draw_pmra_samples, draw_pmdec_samples, ns_rv_arr, 2016.0, 2016.0 - tau_mean
+)
+
+_, _, draw_radius_3sigma = calculate_overlap_2d(
+    np.degrees(draw_ra_past_rad), np.degrees(draw_dec_past_rad), 
+    np.degrees(draw_ra_past_rad), np.degrees(draw_dec_past_rad), 
+    number_sigma, N
+)
+
 # Red dashed circle for the impact area
 pixel_scale = proj_plane_pixel_scales(w)[0]
-radius_pixels = deg_from_center / pixel_scale
+radius_pixels = draw_radius_3sigma / pixel_scale
 target_circle = patches.Circle((target_past_x, target_past_y), radius=radius_pixels, 
                                edgecolor='red', facecolor='none', linestyle='--', 
                                linewidth=2, alpha=0.8, zorder=4)
@@ -547,9 +622,9 @@ for frame_idx, t_mid in enumerate(time_centers):
     #w_elipse = max(6 * ns_ra_sigma, 0.02)
     #h_elipse = max(6 * ns_dec_sigma, 0.02)
 
-    ellipse1 = Ellipse((ns_ra_mean, ns_dec_mean), width=6*ns_ra_sigma, height=6*ns_dec_sigma, 
+    ellipse1 = Ellipse((ns_ra_mean, ns_dec_mean), width=number_sigma*2*ns_ra_sigma, height=number_sigma*2*ns_dec_sigma, 
                        edgecolor='red', facecolor='none', linestyle='--', linewidth=2, zorder=4)
-    ellipse2 = Ellipse((ns_ra_mean, ns_dec_mean), width=6*ns_ra_sigma, height=6*ns_dec_sigma, 
+    ellipse2 = Ellipse((ns_ra_mean, ns_dec_mean), width=number_sigma*2*ns_ra_sigma, height=number_sigma*2*ns_dec_sigma, 
                        edgecolor='red', facecolor='none', linestyle='--', linewidth=2, zorder=4)
     ax1.add_patch(ellipse1)
     ax2.add_patch(ellipse2)

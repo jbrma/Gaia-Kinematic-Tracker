@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador Monte Carlo - Choque Estelar</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e1e;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        .panel {
+            background-color: #2d2d2d;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            margin-bottom: 20px;
+            width: 600px;
+        }
+        h2 { margin-top: 0; color: #4da6ff; }
+        canvas {
+            background-color: #000000;
+            border: 1px solid #444;
+            border-radius: 8px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+        }
+        .control-group { margin: 15px 0; }
+        label { cursor: pointer; display: block; margin-bottom: 8px; }
+        input[type="range"] { width: 100%; margin-top: 10px; }
+        .highlight { color: #ffeb3b; font-weight: bold; }
+        .danger { color: #ff4d4d; font-weight: bold; }
+        .success { color: #4dffa6; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div class="panel">
+        <h2>Simulador de Monte Carlo 3D (Proyección 2D)</h2>
+        
+        <div class="control-group">
+            <strong>1. Elige el método de evaluación:</strong><br>
+            <label>
+                <input type="radio" name="method" value="supervisor" checked> 
+                🔴 Método Supervisor (Límite gigante 2-sigma)
+            </label>
+            <label>
+                <input type="radio" name="method" value="real"> 
+                🟢 Tu Código Real (Radio físico estricto de 0.5 pc)
+            </label>
+        </div>
+
+        <div class="control-group">
+            <strong>2. Mueve la Estrella Candidata (Del centro hacia fuera):</strong>
+            <input type="range" id="distance" min="0" max="250" value="120">
+        </div>
+
+        <div id="infoBox" style="margin-top: 15px; padding: 10px; background: #1a1a1a; border-radius: 5px;">
+            </div>
+    </div>
+
+    <canvas id="simCanvas" width="600" height="400"></canvas>
+
+    <script>
+        const canvas = document.getElementById('simCanvas');
+        const ctx = canvas.getContext('2d');
+        const distSlider = document.getElementById('distance');
+        const radios = document.getElementsByName('method');
+        const infoBox = document.getElementById('infoBox');
+
+        // Configuración
+        const numParticles = 1000;
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        const sigma = 40; // Dispersión de la nube Gaussiana
+        let particles = [];
+
+        // Generador de números aleatorios Gaussianos (Transformación Box-Muller)
+        function randomGaussian() {
+            let u = 0, v = 0;
+            while(u === 0) u = Math.random();
+            while(v === 0) v = Math.random();
+            return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+        }
+
+        // Generar la nube de Monte Carlo del Target (Solo una vez)
+        function initParticles() {
+            particles = [];
+            for(let i = 0; i < numParticles; i++) {
+                particles.push({
+                    x: centerX + randomGaussian() * sigma,
+                    y: centerY + randomGaussian() * sigma
+                });
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const distance = parseInt(distSlider.value);
+            const method = Array.from(radios).find(r => r.checked).value;
+
+            // Posición de la estrella candidata (se mueve hacia la derecha)
+            const candX = centerX + distance;
+            const candY = centerY;
+
+            let hits = 0;
+            const hitRadius = 15; // Representa los 0.5 pc
+            const bigRadius = sigma * 2; // Representa el límite 2-sigma
+
+            // Dibujar las partículas de Monte Carlo
+            particles.forEach(p => {
+                let isHit = false;
+                
+                // Lógica de choque real
+                if(method === 'real') {
+                    const distToCand = Math.hypot(p.x - candX, p.y - candY);
+                    if(distToCand < hitRadius) {
+                        isHit = true;
+                        hits++;
+                    }
+                }
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+                if (isHit) {
+                    ctx.fillStyle = '#4dffa6'; // Partícula chocada
+                    ctx.fill();
+                    ctx.shadowBlur = 10;
+                    ctx.shadowColor = '#4dffa6';
+                } else {
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.2)'; // Nube normal
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+                }
+            });
+
+            // Dibujar áreas según el método
+            if (method === 'supervisor') {
+                // Dibujar el límite 2-sigma gigante
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, bigRadius, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(255, 77, 77, 0.8)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 5]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                const candInside = distance < bigRadius;
+                
+                infoBox.innerHTML = `
+                    <span class="${candInside ? 'danger' : ''}">
+                        Evaluación: ${candInside ? 'CHOQUE VÁLIDO (Pero falso)' : 'Fuera del límite'}
+                    </span><br>
+                    <small>Este es el miedo del supervisor. Como ves, la estrella cuenta como choque incluso si está en el borde donde casi no hay probabilidad de que el Púlsar esté ahí realmente.</small>
+                `;
+            } else {
+                // Dibujar el radio estricto de 0.5 pc alrededor de la candidata
+                ctx.beginPath();
+                ctx.arc(candX, candY, hitRadius, 0, Math.PI * 2);
+                ctx.strokeStyle = '#4dffa6';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                const prob = ((hits / numParticles) * 100).toFixed(1);
+                infoBox.innerHTML = `
+                    <span class="success">
+                        Impactos físicos reales: ${hits} de ${numParticles} partículas. (Probabilidad: ${prob}%)
+                    </span><br>
+                    <small>Así funciona tu código real. Al alejar la estrella a zonas de baja densidad, las partículas que atrapa el radio estricto bajan de forma natural. Matemáticamente impecable.</small>
+                `;
+            }
+
+            // Dibujar la Estrella Candidata (Punto central)
+            ctx.beginPath();
+            ctx.arc(candX, candY, 4, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffeb3b';
+            ctx.fill();
+            
+            // Etiqueta de la candidata
+            ctx.fillStyle = '#ffeb3b';
+            ctx.font = '12px Arial';
+            ctx.fillText("Estrella", candX - 20, candY - 20);
+            
+            // Dibujar el centro (Púlsar teórico)
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, 4, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            ctx.fillText("Centro (Púlsar)", centerX - 40, centerY + 20);
+        }
+
+        // Event Listeners
+        distSlider.addEventListener('input', draw);
+        radios.forEach(r => r.addEventListener('change', draw));
+
+        // Iniciar
+        initParticles();
+        draw();
+    </script>
+</body>
+</html>
