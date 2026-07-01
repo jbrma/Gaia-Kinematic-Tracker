@@ -1202,7 +1202,7 @@ def load_pulsar(csv_path, pulsar_id):
 if __name__ == "__main__":
     np.random.seed(42)
 
-    PULSAR_NAME = 'J0248+6021' 
+    PULSAR_NAME = 'J1809-1943' 
     CANDIDATES_NUMBER = 10
     FILTERS = 0 # 0: Without filter - 1: With filter
 

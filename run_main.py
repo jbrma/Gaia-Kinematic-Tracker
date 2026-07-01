@@ -12,7 +12,7 @@ def run_batch():
     
     # Global execution parameters
     SIM_PARAMS = {'N': 1000, 'sigma': 3}
-    CANDIDATES_NUMBER = 10  # Adjust how many top candidates per pulsar to save
+    CANDIDATES_NUMBER = 50  # Adjust how many top candidates per pulsar to save
 
     # Loop through each pulsar
     for index, row in df_targets.iterrows():
@@ -67,6 +67,8 @@ def run_batch():
                     # Append full DataFrame (with all Gaia & custom parameters) to the master list
                     master_population.append(top_candidates)
 
+                    """ Create the gif for each pulsar
+
                     print("\nStars analyzed and top candidates identified. Generating GIF visualization...")
                     if apply_filter == 1:
                         gif_folder = f"pulsars/{pulsar_name}/runaway_frames_filtered"
@@ -97,7 +99,7 @@ def run_batch():
                         center_dec_past=center_dec_past
                     )
                     print(f"  -> GIF saved in {gif_file}")
-
+                    """
                 else:
                     print("No viable candidates found.")
                     
