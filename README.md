@@ -2,6 +2,12 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+<p align="center">
+  <img src="pulsars/J1809-1943/runaway_evolution.gif" width="700" alt="Kinematic Intersection Monte Carlo 3D">
+  <br>
+  <em>Time-lapse of the Monte Carlo 3D backward tracking simulation.</em>
+</p>
+
 ## 📖 Abstract
 This repository contains an automated, open-source astrophysical pipeline designed to search for surviving binary companions of neutron stars that were ejected after an asymmetric supernova explosion (runaway and walkaway stars). 
 
@@ -14,28 +20,33 @@ The repository is structured around the main execution folder `pulsars/`, which 
 Gaia-Kinematic-Tracker/
 ├── README.md
 ├── requirements.txt
-└── pulsars/                            # Main source code directory
+└── ATNF Catalogue/                       
     ├── ATNF_Pulsar.ipynb               # Jupyter Notebook for ATNF catalog exploration
     ├── ATNF_PulsarCatalogue.csv        # Raw database of known pulsars
+└── pulsars/                        # Data storage subfolder by target
+    ├── J0205+6449/                 
+    │   ├── fits/
+    │   │   └── J0205+6449.fits     # Background astronomical FITS image
+    │   ├── starsDB/
+    │   │   └── J0205+6449.csv      # Gaia background star catalog
+    │   └── Av_profile_J0205+6449.txt # Manually integrated extinction profile
+    └── B1800-21/                   
+        ├── fits/
+        │   └── B1800-21.fits
+        ├── starsDB/
+        │   └── B1800-21.csv
+        └── Av_profile_B1800-21.txt
+└── results/
+    ├── Pulsar_Population_Definitive_10candidates.xlsx
+    ├── Pulsar_Population_Definitive_50candidates.xlsx               
+└── tools/
     ├── convert_coords.py               # Utility script for coordinate transformations
-    ├── pulsar_targets.csv              # Target list containing physical parameters for multiple pulsars
-    ├── run_main.py                     # Batch processing script to run the pipeline sequentially
-    ├── main_oop.py                     # Main Object-Oriented pipeline (Core)
-    ├── download_gaia.py                # Automated Gaia DR3 ADQL query generator
     ├── dust_generate.py                # Interstellar dust profile extraction tool
-    └── pulsars/                        # Data storage subfolder by target
-        ├── J0205+6449/                 
-        │   ├── fits/
-        │   │   └── J0205+6449.fits     # Background astronomical FITS image
-        │   ├── starsDB/
-        │   │   └── J0205+6449.csv      # Gaia background star catalog
-        │   └── Av_profile_J0205+6449.txt # Manually integrated extinction profile
-        └── B1800-21/                   
-            ├── fits/
-            │   └── B1800-21.fits
-            ├── starsDB/
-            │   └── B1800-21.csv
-            └── Av_profile_B1800-21.txt
+├── pulsar_targets.csv              # Target list containing physical parameters for multiple pulsars
+├── run_main.py                     # Batch processing script to run the pipeline sequentially
+├── main_oop.py                     # Main Object-Oriented pipeline (Core)
+├── download_gaia.py                # Automated Gaia DR3 ADQL query generator
+    
 ```
 
 ## 🚀 Key Features & Architecture
@@ -52,22 +63,41 @@ Gaia-Kinematic-Tracker/
   * Constructs 3D covariance matrices and executes the selected number of Monte Carlo clones per star under a **Moving Target model**.
 * **Visualization**: Automatically generates HR diagrams with logarithmic probability color bars, 3D orthogonal projections, and kinematic trajectories overlaid on real FITS astronomical images.
 
-## ⚙️ Installation
-Clone the repository and install the required dependencies:
+## ⚙️ Installation & Data Download (Git LFS)
+This project uses 3D dust maps and astronomical FITS images that can exceed 100 MB. Therefore, this repository uses **Git Large File Storage (LFS)**.
 
+To clone the project and retrieve the real `.fits` and `.csv` data files (instead of small text pointers), please follow these steps:
+
+1. Ensure Git LFS is installed on your system:
+   ```bash
+   git lfs install
+   ```
+2. Clone the repository:
+   ```bash
+   git clone https://github.com/YOUR_USERNAME/Gaia-Kinematic-Tracker.git
+   ```
+3. Navigate to the project directory:
+   ```bash
+   cd Gaia-Kinematic-Tracker
+   ```
+4. **Force the download of the heavy files:**
+   ```bash
+   git lfs pull
+   ```
+
+*(Note: If the `.fits` or `.csv` files still show as a few bytes, you can download them manually from the GitHub web interface by clicking "Download raw file").*
+
+Finally, install the required Python dependencies:
 ```bash
-git clone https://github.com/jbrma/Gaia-Kinematic-Tracker.git
-cd Gaia-Kinematic-Tracker
 pip install -r requirements.txt
 ```
-
 *Main dependencies include: `numpy`, `pandas`, `astropy`, `matplotlib`, `pygaia`, `dustmaps`, and `dustmaps3d`.*
 
 ## 💻 Usage
 Ensure the raw data is placed in its corresponding subfolder (`pulsars/pulsars/PULSAR_NAME/`) before executing the pipeline.
 
 ### Option A: Single Target Execution
-To run the pipeline on a specific pulsar or supernova remnant, configure the target parameters directly in `main_oop.py` and execute:
+To run the pipeline on a specific pulsar or supernova remnant to view the figures, configure the target parameters directly in `main_oop.py` and execute:
 
 ```bash
 cd pulsars
@@ -75,7 +105,7 @@ python main_oop.py
 ```
 
 ### Option B: Batch Processing (Multiple Targets)
-To systematically analyze a population of supernova remnants, add their astrometric and age parameters to `pulsar_targets.csv` and use the batch execution script:
+To analyze a population of supernova remnants, add their astrometric and age parameters to `pulsar_targets.csv` and use the batch execution script:
 
 ```bash
 cd pulsars
@@ -85,7 +115,29 @@ python run_main.py
 The script will iterate through the CSV, executing the A/B testing (With H-R Filter vs. Without Filters) for each pulsar and outputting the top candidates and intersection probabilities in `Pulsar_Population_Definitive.xlsx`.
 
 ## 📊 Scientific Proof of Concept
-As a benchmark test, this pipeline successfully replicated the discovery of "Star A" in the Vela remnant (identifying it as a background interloper via photometry) and successfully identified robust O/B-type massive candidates in systems such as **J0248+6021** and **J1809-2332**.
+As a benchmark test, this pipeline successfully replicated the discovery of "Star A" in the Vela remnant. The algorithm detected the exact kinematic geometric crossing but autonomously discarded it as a background interloper via photometry, proving the necessity of the H-R filter.
+
+<table>
+  <tr>
+    <th align="center">Step 1: Kinematic Intersection (3D)</th>
+    <th align="center">Step 2: Photometric Filtering (H-R)</th>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="pulsars/B0833-45/fits_vela.png" alt="Vela FITS Trajectory">
+    </td>
+    <td width="50%" align="center">
+      <img src="pulsars/B0833-45/HRdiagram_vela.png" alt="Vela HR Diagram">
+    </td>
+  </tr>
+  <tr>
+    <td><em>Backward tracking of "Star A" overlapping the Vela pulsar trajectory over the optical FITS background.</em></td>
+    <td><em>Star A is automatically discarded by the thermodynamic filter for being a faint background dwarf.</em></td>
+  </tr>
+</table>
+
+Following this validation, the pipeline successfully identified new robust O/B-type massive candidates in systems such as **J0248+6021** and **J1809-2332**.
+
 
 ## 📫 Contact & Author
 **Jorge Bravo Mateos**
