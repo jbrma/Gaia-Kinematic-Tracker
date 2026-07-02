@@ -94,13 +94,12 @@ pip install -r requirements.txt
 *Main dependencies include: `numpy`, `pandas`, `astropy`, `matplotlib`, `pygaia`, `dustmaps`, and `dustmaps3d`.*
 
 ## 💻 Usage
-Ensure the raw data is placed in its corresponding subfolder (`pulsars/pulsars/PULSAR_NAME/`) before executing the pipeline.
+Ensure the raw data is placed in its corresponding subfolder (`pulsars/PULSAR_NAME/`) before executing the pipeline.
 
 ### Option A: Single Target Execution
 To run the pipeline on a specific pulsar or supernova remnant to view the figures, configure the target parameters directly in `main_oop.py` and execute:
 
 ```bash
-cd pulsars
 python main_oop.py
 ```
 
@@ -108,7 +107,6 @@ python main_oop.py
 To analyze a population of supernova remnants, add their astrometric and age parameters to `pulsar_targets.csv` and use the batch execution script:
 
 ```bash
-cd pulsars
 python run_main.py
 ```
 
