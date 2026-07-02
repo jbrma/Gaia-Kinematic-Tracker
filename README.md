@@ -74,7 +74,7 @@ To clone the project and retrieve the real `.fits` and `.csv` data files (instea
    ```
 2. Clone the repository:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/Gaia-Kinematic-Tracker.git
+   git clone https://github.com/jbrma/Gaia-Kinematic-Tracker.git
    ```
 3. Navigate to the project directory:
    ```bash
